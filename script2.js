@@ -94,11 +94,11 @@ gltfLoader.load(
           }
           if (mat.normalMap) mat.normalMap.needsUpdate = true;
           if (mat.metalnessMap) {
-            mat.metalnessMap.encoding = THREE.LinearColorSpace; // 金属贴图通常是线性
+            mat.metalnessMap.encoding = THREE.LinearSRGBColorSpace; // 金属贴图通常是线性
             mat.metalnessMap.needsUpdate = true;
           }
           if (mat.roughnessMap) {
-            mat.roughnessMap.encoding = THREE.LinearColorSpace;
+            mat.roughnessMap.encoding = THREE.LinearSRGBColorSpace;
             mat.roughnessMap.needsUpdate = true;
           }
           if (mat.emissiveMap) {
