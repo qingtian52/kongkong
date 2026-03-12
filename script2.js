@@ -75,7 +75,7 @@ gltfLoader.setDRACOLoader(dracoLoader);
 
 let mixer = null;
 gltfLoader.load(
-  'kongkong.glb',
+  '/kongkong.glb',
   (gltf) => {
     const model = gltf.scene;
     scene.add(model);
