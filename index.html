@@ -1,13 +1,35 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <title>kongkong</title>
-  <style>
-    body { margin: 0; overflow: hidden; background-color: #0a192f; }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kong Kong 3D Gallery</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            /* 背景色调整为更温暖的灰白色，配合新灯光 */
+            background-color: #f4f1ea; 
+            font-family: sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #333;
+            font-size: 1.2rem;
+            pointer-events: none;
+        }
+    </style>
 </head>
 <body>
-  <script type="module" src="./script2.js"></script>
+    <div id="loading">正在加载模型...</div>
+
+    <!-- 重点：type="module" 且 src 指向你的 script.js -->
+    <script type="module" src="/script8.js"></script>
 </body>
 </html>

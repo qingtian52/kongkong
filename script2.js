@@ -40,30 +40,41 @@ controls.minDistance = 2;
 controls.maxDistance = 15;
 controls.maxPolarAngle = Math.PI / 2;
 
-// 3. 光照：重新平衡，降低强度以防过曝
-const hemiLight = new THREE.HemisphereLight(0xd6c38b, 0x8f9bb3,5); // 强度略降
-scene.add(hemiLight);
+// ==================== 灯光系统（平衡布光）====================
+// 主光（暖白，适度强度）
+const mainLight = new THREE.DirectionalLight(0xffeebb, 1.2); // 👈 从 1.8 降到 1.2
+mainLight.position.set(5, 10, 7);
+mainLight.castShadow = true;
+mainLight.shadow.mapSize.width = 2048;
+mainLight.shadow.mapSize.height = 2048;
+mainLight.shadow.camera.near = 0.5;
+mainLight.shadow.camera.far = 50;
+mainLight.shadow.bias = -0.0001;
+scene.add(mainLight);
 
-const ambientLight = new THREE.AmbientLight(0xb77f70, 4); // 降低环境光
+// 补光（冷白，填充暗部）
+const fillLight = new THREE.DirectionalLight(0xccddff, 0.5); // 👈 从 0.8 降到 0.5
+fillLight.position.set(-5, 0, -5);
+scene.add(fillLight);
+
+// 轮廓光（蓝色，勾勒边缘）
+const rimLight = new THREE.DirectionalLight(0x88ccff, 0.6); // 👈 从 0.9 降到 0.6
+rimLight.position.set(0, 5, -10);
+scene.add(rimLight);
+
+// 环境光（柔和基础照明）
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // 👈 从 0.7 降到 0.5
 scene.add(ambientLight);
 
-// 主光源：暖色，强度降低
-const directionalLight1 = new THREE.DirectionalLight(0xffe6d5,7);
-directionalLight1.position.set(5, 5, -2);
-directionalLight1.castShadow = true;
-directionalLight1.shadow.mapSize.width = 1024;
-directionalLight1.shadow.mapSize.height = 1024;
-scene.add(directionalLight1);
+// 顶部柔光箱（模拟摄影棚顶灯）
+const topLight = new THREE.PointLight(0xffd700, 0.4, 50); // 👈 从 0.6 降到 0.4
+topLight.position.set(0, 15, 0);
+scene.add(topLight);
 
-// 补光：冷色，强度降低
-const directionalLight2 = new THREE.DirectionalLight(0xc0d0e0, 2);
-directionalLight2.position.set(-5, 5, -5);
-scene.add(directionalLight2);
-
-// 背光：柔和
-const backLight = new THREE.DirectionalLight(0xffffff, 1);
-backLight.position.set(0, 2, 5);
-scene.add(backLight);
+// 🔥 半球光（模拟天空漫射，但降低强度）
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4); // 👈 从 0.6 降到 0.4
+hemiLight.position.set(0, 20, 0);
+scene.add(hemiLight);
 
 // 4. 加载模型
 const gltfLoader = new GLTFLoader();
