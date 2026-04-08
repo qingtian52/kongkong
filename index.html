@@ -2,34 +2,56 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kong Kong 3D Gallery</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Kong Kong 3D Gallery </title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            /* 背景色调整为更温暖的灰白色，配合新灯光 */
-            background-color: #f4f1ea; 
-            font-family: sans-serif;
+            font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
         }
         canvas {
             display: block;
+            width: 100%;
+            height: 100%;
         }
         #loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #333;
-            font-size: 1.2rem;
+            color: #fff;
+            background: rgba(0,0,0,0.6);
+            padding: 12px 24px;
+            border-radius: 40px;
+            font-size: 1rem;
+            backdrop-filter: blur(8px);
             pointer-events: none;
+            z-index: 9999;
+            font-weight: 500;
+            letter-spacing: 1px;
+        }
+        /* 复位按钮额外样式（脚本会动态创建，此处仅作兜底） */
+        .reset-btn {
+            transition: all 0.2s ease;
         }
     </style>
 </head>
 <body>
-    <div id="loading">正在加载模型...</div>
+    <div id="loading">✨ 加载梦幻世界...</div>
 
-    <!-- 重点：type="module" 且 src 指向你的 script.js -->
-    <script type="module" src="/script8.js"></script>
+    <!-- 导入映射：确保 Three.js 和 GSAP 正确加载 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/",
+                "gsap": "https://unpkg.com/gsap@3.12.5/index.js"
+            }
+        }
+    </script>
+
+    <!-- 主逻辑脚本 -->
+    <script type="module" src="./script10.js"></script>
 </body>
 </html>
