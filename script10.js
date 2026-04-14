@@ -6,15 +6,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import gsap from 'gsap';
 import * as XLSX from 'xlsx';
 
-// ================= 列映射配置 =================
+// ================= 列映射配置（新Excel：5列） =================
 const COLUMN_CONFIG = {
     gridIdCol: 0,        // A列: grid_id
     nameCol: 1,          // B列: 领养者姓名
     wechatImgCol: 2,     // C列: 微信头像（图片文件名）
     locationCol: 3,      // D列: 地理位置
-    albumCol: 4,         // E列: 对应的相册名
-    noteCol: 5,          // F列: 笔记
-    emptyImgCol: 6       // G列: 空空照片1（图片文件名）
+    noteCol: 4           // E列: 笔记
 };
 // =================================================================
 
@@ -28,11 +26,11 @@ scene.backgroundIntensity = 0.9;
 scene.environment = null;
 
 const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
-const initialCameraPos = new THREE.Vector3(0, -100, 60);
+const initialCameraPos = new THREE.Vector3(0, -80, 80);
 const initialCameraTarget = new THREE.Vector3(0, 0, 0);
 camera.position.copy(initialCameraPos);
 camera.lookAt(initialCameraTarget);
-camera.zoom = 1.0;                  // 默认 zoom
+camera.zoom = 1.0;
 camera.updateProjectionMatrix();
 
 const renderer = new THREE.WebGLRenderer({
@@ -82,7 +80,7 @@ const warmFill = new THREE.PointLight(0xffaa66, 0.8);
 warmFill.position.set(5, 8, 10);
 scene.add(warmFill);
 
-// ---------- 3. 轨道控制 ----------
+// ---------- 3. 轨道控制（限制左右旋转30°）----------
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
@@ -93,8 +91,8 @@ controls.target.copy(initialCameraTarget);
 controls.maxPolarAngle = Math.PI / 2.1;
 controls.maxDistance = 200;
 controls.minDistance = 10;
-controls.minAzimuthAngle = -Math.PI / 6;   // 向左最多30°
-controls.maxAzimuthAngle = Math.PI / 6;    // 向右最多30°
+controls.minAzimuthAngle = -Math.PI / 6;   // 左转30°
+controls.maxAzimuthAngle = Math.PI / 6;    // 右转30°
 controls.update();
 
 // ---------- 4. 返回按钮（修复摄像机重置）----------
@@ -126,11 +124,10 @@ resetBtn.onmouseleave = () => resetBtn.style.background = 'rgba(255,255,255,0.9)
 resetBtn.onclick = () => {
     gsap.killTweensOf(camera.position);
     gsap.killTweensOf(controls.target);
-    gsap.killTweensOf(camera);      // 终止 zoom 动画
+    gsap.killTweensOf(camera);
     camera.up.set(0, 1, 0);
     camera.position.copy(initialCameraPos);
     controls.target.copy(initialCameraTarget);
-    // 关键：恢复默认 zoom 并更新投影矩阵
     camera.zoom = 1.0;
     camera.updateProjectionMatrix();
     controls.update();
@@ -150,17 +147,17 @@ let hoveredGridName = '';
 let dialogElement = null;
 let isDialogVisible = false;
 
-// 相机动画参数（调整后：zoom 减小，距离增大）
-const CAM_ZOOM_IN = 0.65;               // 原来 1.6 → 1.2，画面更远
+// 相机动画参数
+const CAM_ZOOM_IN = 1.2;
 const PULL_DISTANCE = 8;
 const PULL_DIRECTION = new THREE.Vector3(0, 0, 1);
 const SCALE_FACTOR = 1.25;
 const CAM_RIGHT_OFFSET_RATIO = 0.55;
-const CAM_EXTRA_ZOOM = -8;              // 原来 -16 → -8，相机距离增大
-const MIN_CAMERA_DISTANCE = 12;         // 原来 8 → 12，最小距离增大
+const CAM_EXTRA_ZOOM = -28;
+const MIN_CAMERA_DISTANCE = 12;
 
 // ---------- 6. Excel 数据加载 ----------
-const gridDataMap = new Map();
+const gridDataMap = new Map(); // key: 格子编号, value: { name, wechatImgUrl, location, note }
 
 function buildImageUrl(fileName) {
     if (!fileName) return '';
@@ -200,23 +197,18 @@ async function loadExcelData() {
             const name = row[COLUMN_CONFIG.nameCol] ? String(row[COLUMN_CONFIG.nameCol]).trim() : '';
             const wechatImgFile = row[COLUMN_CONFIG.wechatImgCol] ? String(row[COLUMN_CONFIG.wechatImgCol]).trim() : '';
             const location = row[COLUMN_CONFIG.locationCol] ? String(row[COLUMN_CONFIG.locationCol]).trim() : '';
-            const album = row[COLUMN_CONFIG.albumCol] ? String(row[COLUMN_CONFIG.albumCol]).trim() : '';
             const note = row[COLUMN_CONFIG.noteCol] ? String(row[COLUMN_CONFIG.noteCol]).trim() : '';
-            const emptyImgFile = row[COLUMN_CONFIG.emptyImgCol] ? String(row[COLUMN_CONFIG.emptyImgCol]).trim() : '';
 
             const wechatImgUrl = buildImageUrl(wechatImgFile);
-            const emptyImgUrl = buildImageUrl(emptyImgFile);
 
             gridDataMap.set(pureId, {
                 name,
                 wechatImgUrl,
                 location,
-                album,
-                note,
-                emptyImgUrl
+                note
             });
 
-            console.log(`✅ 加载格子 ${pureId}: 姓名=${name}, 微信头像=${wechatImgUrl || '无'}, 位置=${location}, 相册=${album}, 笔记=${note.substring(0,20)}, 空空照片=${emptyImgUrl || '无'}`);
+            console.log(`✅ 加载格子 ${pureId}: 姓名=${name}, 微信头像=${wechatImgUrl || '无'}, 位置=${location}, 笔记=${note.substring(0,20)}`);
         }
         console.log(`🎉 成功加载 ${gridDataMap.size} 条格子配置`);
         return true;
@@ -231,85 +223,74 @@ function getDialogDataForGrid(gridParent) {
     const match = gridParent.name.match(/\d+/);
     let gridNumber = match ? match[0] : '';
     if (!gridNumber) return null;
-    const data = gridDataMap.get(gridNumber);
-    if (data) {
-        return data;
-    }
-    console.warn(`⚠️ 未找到格子 ${gridNumber} 的配置数据`);
-    return null;
+    return gridDataMap.get(gridNumber) || null;
 }
 
-// ---------- 7. 图文弹窗 ----------
+// ---------- 7. 图文弹窗（直角方框，左侧头像，右侧姓名+位置，下方笔记）----------
 function initDialog() {
     if (!document.getElementById('dialog-bubble-style')) {
         const style = document.createElement('style');
         style.id = 'dialog-bubble-style';
         style.textContent = `
             .dialog-bubble {
-                position: fixed;
-                background: rgba(0, 0, 0, 0.85);
-                backdrop-filter: blur(12px);
-                border: 1px solid rgba(255, 255, 255, 0.25);
-                border-radius: 20px;
-                font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-                color: #ffffff;
-                box-shadow: 0 8px 20px rgba(0,0,0,0.3);
-                z-index: 999;
-                opacity: 0;
-                transform: translate(-50%, -50%) scale(0.9);
-                pointer-events: none;
-                transition: all 0.25s cubic-bezier(0.2, 0.9, 0.4, 1.1);
-                max-width: 320px;
-                min-width: 240px;
-                padding: 16px 20px;
-            }          
-            .dialog-content {
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-            }
-            .dialog-row {
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-            }
-            .dialog-label {
-                font-size: 13px;
-                font-weight: 600;
-                color: #ffaa66;
-                letter-spacing: 1px;
-            }
-            .dialog-value {
-                font-size: 14px;
-                line-height: 1.4;
-                word-break: break-word;
-                white-space: normal;
-            }
-            .dialog-img {
-                text-align: center;
-                margin: 4px 0;
-            }
-            .dialog-img img {
-                max-width: 100%;
-                max-height: 140px;
-                border-radius: 12px;
-                object-fit: contain;
-                background: rgba(255,255,255,0.1);
-            }
-            .img-placeholder {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 80px;
-                background: rgba(255,255,255,0.1);
-                border-radius: 12px;
-                color: #aaa;
-                font-size: 13px;
-            }
-            hr {
-                margin: 4px 0;
-                border-color: rgba(255,255,255,0.2);
-            }
+            position: fixed;
+            background: #90D3F4;
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 0;
+            font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+            color: #ffffff;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            z-index: 999;
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.9);
+            pointer-events: none;
+            transition: all 0.25s cubic-bezier(0.2, 0.9, 0.4, 1.1);
+            width: 400px;
+            padding: 25px;               /* 正常内边距，无多余空白 */
+            height: 430px;               /* 设定你满意的高度 */
+            display: flex;
+            flex-direction: column;
+        }
+        .dialog-bubble::before {
+            display: none;
+        }
+        .dialog-img {
+            flex: 0 0 120px;
+            width: 120px;
+            margin-right: 12px;
+        }
+        .dialog-img img {
+            width: 100%;
+            height: auto;
+            border-radius: 0;
+            object-fit: cover;
+        }
+        .dialog-right {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            margin-top: 8px;
+            flex: 1;
+        }
+        .dialog-name {
+            font-size: 35px;
+            font-weight: bold;
+            margin-bottom: 18px;
+        }
+        .dialog-location {
+            font-size: 28px;
+            color: #F0E05F;
+        }
+        .dialog-note {
+            flex-grow: 1;                /* 笔记区域自动撑开剩余高度 */
+            overflow-y: auto;            /* 内容过多时滚动 */
+            margin-top: 25px;
+            font-size: 20px;
+            line-height: 1.4;
+            border-top: 0.2px solid rgba(255,255,255,0.2);
+            padding-top: 10px;
+        }
         `;
         document.head.appendChild(style);
     }
@@ -328,45 +309,32 @@ function escapeHtml(str) {
     });
 }
 
-function generateImageHtml(imgUrl, altText) {
-    if (!imgUrl) {
-        return `<div class="img-placeholder">📷 暂无图片</div>`;
-    }
-    return `<div class="dialog-img"><img src="${imgUrl}" alt="${escapeHtml(altText)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none;align-items:center;justify-content:center;min-height:80px;" class="img-placeholder">📷 图片加载失败</div></div>`;
-}
-
 function updateDialogContent() {
     if (!activeGrid || !dialogElement) return;
     const data = getDialogDataForGrid(activeGrid);
-    let html = '<div class="dialog-content">';
-
+    let html = '';
     if (data) {
-        if (data.name) {
-            html += `<div class="dialog-row"><div class="dialog-label">🐾 领养者</div><div class="dialog-value">${escapeHtml(data.name)}</div></div>`;
-        }
-        if (data.wechatImgUrl) {
-            html += `<div class="dialog-row"><div class="dialog-label">📷 微信头像</div>${generateImageHtml(data.wechatImgUrl, '微信头像')}</div>`;
-        }
-        if (data.location) {
-            html += `<div class="dialog-row"><div class="dialog-label">📍 地理位置</div><div class="dialog-value">${escapeHtml(data.location)}</div></div>`;
-        }
-        if (data.album) {
-            html += `<div class="dialog-row"><div class="dialog-label">📁 相册名</div><div class="dialog-value">${escapeHtml(data.album)}</div></div>`;
-        }
-        if (data.note) {
-            html += `<div class="dialog-row"><div class="dialog-label">📝 笔记</div><div class="dialog-value">${escapeHtml(data.note)}</div></div>`;
-        }
-        if (data.emptyImgUrl) {
-            html += `<div class="dialog-row"><div class="dialog-label">📷 空空照片</div>${generateImageHtml(data.emptyImgUrl, '空空照片')}</div>`;
-        }
-        if (!data.name && !data.location && !data.album && !data.note && !data.wechatImgUrl && !data.emptyImgUrl) {
-            html += `<div class="dialog-row"><div class="dialog-value">✨ 暂无详细资料 ✨</div></div>`;
-        }
+        const imgHtml = data.wechatImgUrl 
+            ? `<div class="dialog-img"><img src="${data.wechatImgUrl}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none; text-align:center;">📷</div></div>`
+            : `<div class="dialog-img" style="background:rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center;">📷</div>`;
+        
+        const nameHtml = `<div class="dialog-name">${escapeHtml(data.name || '匿名')}</div>`;
+        const locationHtml = `<div class="dialog-location">📍 ${escapeHtml(data.location || '未知地点')}</div>`;
+        const noteHtml = `<div class="dialog-note">${escapeHtml(data.note || '暂无笔记')}</div>`;
+        
+        html = `
+            <div style="display:flex; align-items:flex-start;">
+                ${imgHtml}
+                <div class="dialog-right">
+                    ${nameHtml}
+                    ${locationHtml}
+                </div>
+            </div>
+            ${noteHtml}
+        `;
     } else {
-        html += `<div class="dialog-row"><div class="dialog-value">✨ 暂无配置信息，敬请期待 ✨</div></div>`;
+        html = `<div style="text-align:center; padding:10px;">✨ 暂无资料 ✨</div>`;
     }
-
-    html += '</div>';
     dialogElement.innerHTML = html;
 }
 
@@ -391,8 +359,8 @@ function updateDialogPosition() {
     const box = new THREE.Box3().setFromObject(activeGrid);
     if (box.isEmpty()) return;
     const rightPos = new THREE.Vector3(
-        box.max.x + 2,
-        (box.min.y + box.max.y) / 2 + 0.8,
+        box.max.x + 3.2,
+        (box.min.y + box.max.y) / 2 -0.3,
         (box.min.z + box.max.z) / 2
     );
     const screenPos = rightPos.clone().project(camera);
