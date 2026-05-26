@@ -15,22 +15,116 @@ const COLUMN_CONFIG = {
     noteCol: 4
 };
 
+// ---------- 全局加载进度管理 ----------
+let excelLoadedFlag = false;
+let modelLoadedFlag = false;
+let modelProgressRatio = 0;
+let totalProgress = 0;
+
+let loadingOverlay = null;
+let progressFillElement = null;
+
+function createLoadingOverlay() {
+    const oldOverlay = document.getElementById('loading-overlay');
+    if (oldOverlay) oldOverlay.remove();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'loading-overlay';
+    overlay.innerHTML = `
+        <div class="loading-container">
+            <div class="loading-text">✨ 加载中... ✨</div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill"></div>
+            </div>
+            
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    loadingOverlay = overlay;
+    progressFillElement = overlay.querySelector('.progress-bar-fill');
+    
+    const oldLoadingDiv = document.getElementById('loading');
+    if (oldLoadingDiv) oldLoadingDiv.style.display = 'none';
+}
+
+function updateTotalProgress() {
+    if (!progressFillElement) return;
+    let weightedProgress = 0;
+    if (excelLoadedFlag) weightedProgress += 0.3;
+    if (modelLoadedFlag) {
+        weightedProgress += 0.7;
+    } else {
+        weightedProgress += (modelProgressRatio * 0.7);
+    }
+    totalProgress = Math.min(0.999, Math.max(0, weightedProgress));
+    const percent = totalProgress * 100;
+    progressFillElement.style.width = `${percent}%`;
+    
+    if (excelLoadedFlag && modelLoadedFlag) {
+        progressFillElement.style.width = '100%';
+        setTimeout(() => {
+            if (loadingOverlay) {
+                loadingOverlay.style.opacity = '0';
+                setTimeout(() => {
+                    if (loadingOverlay && loadingOverlay.parentNode) {
+                        loadingOverlay.remove();
+                    }
+                }, 500);
+            }
+        }, 200);
+    }
+}
+
+function markExcelLoaded() {
+    if (excelLoadedFlag) return;
+    excelLoadedFlag = true;
+    updateTotalProgress();
+    tryFinalizeAllResources();
+}
+
+function markModelLoaded() {
+    if (modelLoadedFlag) return;
+    modelLoadedFlag = true;
+    modelProgressRatio = 1;
+    updateTotalProgress();
+    tryFinalizeAllResources();
+}
+
+function updateModelProgress(loaded, total) {
+    if (modelLoadedFlag) return;
+    if (total > 0) {
+        modelProgressRatio = Math.min(1, loaded / total);
+        updateTotalProgress();
+    }
+}
+
+let finalizeExecuted = false;
+function tryFinalizeAllResources() {
+    if (finalizeExecuted) return;
+    if (excelLoadedFlag && modelLoadedFlag) {
+        finalizeExecuted = true;
+        if (typeof createAllDialogMeshes === 'function' && gridParents.length > 0) {
+            if (dialogMeshMap.size === 0) {
+                createAllDialogMeshes();
+                console.log('所有资源加载完毕，弹窗已创建');
+            }
+        } else if (gridParents.length > 0) {
+            setTimeout(() => {
+                if (dialogMeshMap.size === 0 && typeof createAllDialogMeshes === 'function') {
+                    createAllDialogMeshes();
+                }
+            }, 100);
+        }
+    }
+}
+
 // ---------- 1. 场景初始化 ----------
 const scene = new THREE.Scene();
-const textureLoader = new THREE.TextureLoader();
-
-// 白天/黑夜背景纹理
-const dayTexture = textureLoader.load('/sky.png');
-dayTexture.colorSpace = THREE.SRGBColorSpace;
-const nightTexture = textureLoader.load('/dark.png');
-nightTexture.colorSpace = THREE.SRGBColorSpace;
-
-let isDayMode = true;
-scene.background = dayTexture;
-scene.backgroundIntensity = 0.9;
+scene.background = null;
 scene.environment = null;
 
-const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.5, 500);
 const initialCameraPos = new THREE.Vector3(0, 5, 120);
 const initialCameraTarget = new THREE.Vector3(0, 0, 0);
 camera.position.copy(initialCameraPos);
@@ -48,10 +142,26 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// if (renderer.shadowMap.mapSize) {
+//     renderer.shadowMap.mapSize.set(1024, 1024);
+// } else {
+//     renderer.shadowMap.mapSize = { width: 1024, height: 1024 };
+// }
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.6;
+renderer.setClearColor(0x000000, 0);
+renderer.sortObjects = true;
 document.body.appendChild(renderer.domElement);
+
+document.body.style.margin = '0';
+document.body.style.padding = '0';
+document.body.style.overflow = 'hidden';
+document.body.style.backgroundImage = "url('/sky.png')";
+document.body.style.backgroundSize = 'cover';
+document.body.style.backgroundRepeat = 'no-repeat';
+document.body.style.backgroundPosition = 'center center';
+document.body.style.backgroundColor = '#000';
 
 // ---------- 2. 灯光系统 ----------
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
@@ -60,16 +170,16 @@ scene.add(ambientLight);
 const dirLight = new THREE.DirectionalLight(0xfff8e8, 2);
 dirLight.position.set(12, 22, 15);
 dirLight.castShadow = true;
-dirLight.shadow.mapSize.width = 4096;
-dirLight.shadow.mapSize.height = 4096;
+dirLight.shadow.mapSize.width = 1024;
+dirLight.shadow.mapSize.height = 1024;
 dirLight.shadow.bias = -0.0001;
 dirLight.shadow.normalBias = 0.05;
 dirLight.shadow.camera.near = 0.5;
 dirLight.shadow.camera.far = 80;
-dirLight.shadow.camera.left = -40;
-dirLight.shadow.camera.right = 40;
-dirLight.shadow.camera.top = 40;
-dirLight.shadow.camera.bottom = -40;
+dirLight.shadow.camera.left = -30;
+dirLight.shadow.camera.right = 30;
+dirLight.shadow.camera.top = 30;
+dirLight.shadow.camera.bottom = -30;
 dirLight.shadow.camera.updateProjectionMatrix();
 scene.add(dirLight);
 
@@ -83,9 +193,12 @@ scene.add(backLight);
 
 const warmFill = new THREE.PointLight(0xffaa66, 0.8);
 warmFill.position.set(5, 8, 10);
+warmFill.distance = 30;
+warmFill.decay = 1.5;
 scene.add(warmFill);
 
-// 保存灯光默认强度
+let topPointLights = [];
+
 const lightIntensities = {
     ambient: 0.55,
     dir: 2,
@@ -94,32 +207,86 @@ const lightIntensities = {
     warm: 0.8
 };
 
+let glowMeshSet = new Set();
+let gridParents = [];
+let activeGrid = null;
+let hoveredGridName = '';
+let mixer = null;
+let interactiveMeshes = [];
+let kongRemeshMeshSet = new Set();
+let dialogMeshMap = new Map();
+let currentVisibleDialogMesh = null;
+
+function initTopPointLights() {
+    topPointLights.forEach(light => {
+        if (light.parent) light.parent.remove(light);
+    });
+    topPointLights = [];
+    if (!gridParents.length) return;
+
+    gridParents.forEach(grid => {
+        grid.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(grid);
+        if (box.isEmpty()) return;
+        const center = box.getCenter(new THREE.Vector3());
+        const topY = box.max.y;
+        const light = new THREE.PointLight(0xffaa77, isDayMode ? 0 : 8);
+        light.distance = 6;
+        light.decay = 1.2;
+        light.castShadow = false;
+        light.shadow = null;
+        const worldPos = new THREE.Vector3(center.x, topY - 1, center.z);
+        const localPos = grid.worldToLocal(worldPos);
+        light.position.copy(localPos);
+        grid.add(light);
+        topPointLights.push(light);
+    });
+    console.log(`为 ${topPointLights.length} 个格子创建了点光源`);
+}
+
+let isDayMode = true;
+
 function toggleTheme() {
     isDayMode = !isDayMode;
     if (isDayMode) {
-        scene.background = dayTexture;
+        document.body.style.backgroundImage = "url('/sky.png')";
         ambientLight.intensity = lightIntensities.ambient;
         dirLight.intensity = lightIntensities.dir;
         fillLight.intensity = lightIntensities.fill;
         backLight.intensity = lightIntensities.back;
         warmFill.intensity = lightIntensities.warm;
-        themeBtn.style.backgroundImage = "url('/day.png')";
-        themeBtn.innerHTML = '';
-        themeBtn.style.backgroundSize = 'cover';
+        topPointLights.forEach(light => { if (light) light.intensity = 0; });
+        setGlowModelsIntensity(0.1, 0x222222);
+        themeBtn.style.backgroundImage = "url('/night.png')";
     } else {
-        scene.background = nightTexture;
+        document.body.style.backgroundImage = "url('/dark.png')";
         ambientLight.intensity = lightIntensities.ambient * 0.25;
         dirLight.intensity = lightIntensities.dir * 0.3;
         fillLight.intensity = lightIntensities.fill * 0.2;
         backLight.intensity = lightIntensities.back * 0.2;
         warmFill.intensity = lightIntensities.warm * 0.15;
-        themeBtn.style.backgroundImage = "url('/night.png')";
-        themeBtn.innerHTML = '';
-        themeBtn.style.backgroundSize = 'cover';
+        topPointLights.forEach(light => { if (light) light.intensity = 8; });
+        setGlowModelsIntensity(2, 0xffaa66);
+        themeBtn.style.backgroundImage = "url('/day.png')";
     }
+    themeBtn.style.backgroundSize = 'cover';
 }
 
-// ---------- 3. 轨道控制 ----------
+function setGlowModelsIntensity(intensity, colorHex) {
+    const color = new THREE.Color(colorHex);
+    glowMeshSet.forEach(mesh => {
+        if (mesh.isMesh && mesh.material) {
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach(mat => {
+                if (mat.emissive !== undefined) {
+                    mat.emissive = color;
+                    mat.emissiveIntensity = intensity;
+                }
+            });
+        }
+    });
+}
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
@@ -136,14 +303,11 @@ controls.minAzimuthAngle = -Math.PI / 6;
 controls.maxAzimuthAngle = Math.PI / 6;
 controls.update();
 
-// ---------- 4. 重置函数 ----------
 function resetToInitialState() {
     closeIntroModal();
-    
     gsap.killTweensOf(camera.position);
     gsap.killTweensOf(controls.target);
     gsap.killTweensOf(camera);
-    
     camera.up.set(0, 1, 0);
     camera.position.copy(initialCameraPos);
     controls.target.copy(initialCameraTarget);
@@ -151,14 +315,11 @@ function resetToInitialState() {
     camera.updateProjectionMatrix();
     controls.update();
     camera.lookAt(initialCameraTarget);
-    
     if (activeGrid) {
         resetGridAnimation(activeGrid);
         activeGrid = null;
     }
-    
     hideAllDialogs();
-    
     if (gridParents.length) {
         gridParents.forEach(grid => {
             grid.traverse(child => {
@@ -173,7 +334,6 @@ function resetToInitialState() {
     hoveredGridName = '';
 }
 
-// ---------- 5. 右上角按钮组 ----------
 const btnContainer = document.createElement('div');
 btnContainer.style.cssText = `
     position: fixed;
@@ -198,10 +358,10 @@ function addHoverText(btn, text, bgImageUrl) {
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 24px;
+        font-size: 18px;
         font-weight: bold;
         color: white;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
         background-color: rgba(0,0,0,0.6);
         border-radius: inherit;
         opacity: 0;
@@ -210,7 +370,6 @@ function addHoverText(btn, text, bgImageUrl) {
     `;
     btn.style.position = 'relative';
     btn.appendChild(textSpan);
-    
     btn.addEventListener('mouseenter', () => {
         textSpan.style.opacity = '1';
         btn.style.backgroundImage = 'none';
@@ -223,8 +382,8 @@ function addHoverText(btn, text, bgImageUrl) {
 
 const avatarBtn = document.createElement('div');
 avatarBtn.style.cssText = `
-    width: 80px;
-    height: 80px;
+    width: 50px;
+    height: 50px;
     border-radius: 50%;
     background-image: url('/头像.png');
     background-size: cover;
@@ -232,7 +391,6 @@ avatarBtn.style.cssText = `
     cursor: pointer;
     transition: transform 0.2s ease;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    border: 0px solid rgba(255,255,255,0.6);
 `;
 avatarBtn.onmouseenter = () => avatarBtn.style.transform = 'scale(1.05)';
 avatarBtn.onmouseleave = () => avatarBtn.style.transform = 'scale(1)';
@@ -244,8 +402,8 @@ addHoverText(avatarBtn, '关于', '/头像.png');
 
 const resetBtn = document.createElement('div');
 resetBtn.style.cssText = `
-    width: 80px;
-    height: 80px;
+    width: 54px;
+    height: 54px;
     cursor: pointer;
     transition: all 0.2s ease;
     background-image: url('/back01.png');
@@ -253,63 +411,53 @@ resetBtn.style.cssText = `
     background-repeat: no-repeat;
     background-position: center;
     border-radius: 50%;
-    background-color: rgba(0,0,0,0.001);
+    background-color: rgba(0,0,0,0.01);
 `;
 resetBtn.onclick = (e) => {
     e.stopPropagation();
     resetToInitialState();
 };
+resetBtn.onmouseenter = () => resetBtn.style.transform = 'scale(1.05)';
+resetBtn.onmouseleave = () => resetBtn.style.transform = 'scale(1)';
 addHoverText(resetBtn, '返回', '/back01.png');
 
 const themeBtn = document.createElement('div');
 themeBtn.style.cssText = `
-    width: 80px;
-    height: 80px;
+    width: 50px;
+    height: 50px;
     border-radius: 50%;
-    background-image: url('/day.png');
     background-size: cover;
     background-position: center;
     cursor: pointer;
     transition: transform 0.2s ease;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    background-color: rgba(0,0,0,0.2);
+    background-color: rgba(0,0,0,0.002);
 `;
 themeBtn.onmouseenter = () => themeBtn.style.transform = 'scale(1.05)';
 themeBtn.onmouseleave = () => themeBtn.style.transform = 'scale(1)';
+
+function handleThemeBtnHover() {
+    themeBtn.style.backgroundImage = isDayMode ? "url('/hovernight.png')" : "url('/hoverday.png')";
+    themeBtn.style.backgroundSize = 'cover';
+}
+function handleThemeBtnLeave() {
+    themeBtn.style.backgroundImage = isDayMode ? "url('/night.png')" : "url('/day.png')";
+    themeBtn.style.backgroundSize = 'cover';
+}
+themeBtn.addEventListener('mouseenter', handleThemeBtnHover);
+themeBtn.addEventListener('mouseleave', handleThemeBtnLeave);
 themeBtn.onclick = (e) => {
     e.stopPropagation();
     toggleTheme();
 };
-
-const dayImg = new Image();
-dayImg.onerror = () => {
-    if (isDayMode) {
-        themeBtn.style.backgroundImage = 'none';
-        themeBtn.innerHTML = '🌞';
-        themeBtn.style.fontSize = '48px';
-        themeBtn.style.lineHeight = '80px';
-        themeBtn.style.textAlign = 'center';
-    }
-};
-dayImg.src = '/day.png';
-const nightImg = new Image();
-nightImg.onerror = () => {
-    if (!isDayMode) {
-        themeBtn.style.backgroundImage = 'none';
-        themeBtn.innerHTML = '🌙';
-        themeBtn.style.fontSize = '48px';
-        themeBtn.style.lineHeight = '80px';
-        themeBtn.style.textAlign = 'center';
-    }
-};
-nightImg.src = '/night.png';
+themeBtn.style.backgroundImage = "url('/night.png')";
+themeBtn.style.backgroundSize = 'cover';
 
 btnContainer.appendChild(avatarBtn);
 btnContainer.appendChild(resetBtn);
 btnContainer.appendChild(themeBtn);
 document.body.appendChild(btnContainer);
 
-// ---------- 6. 简介弹窗 ----------
 let introModal = null;
 let isIntroModalVisible = false;
 let outsideClickHandler = null;
@@ -321,7 +469,6 @@ function showIntroModal() {
         bindOutsideClick();
         return;
     }
-    
     introModal = document.createElement('div');
     introModal.style.cssText = `
         position: fixed;
@@ -344,22 +491,21 @@ function showIntroModal() {
         resize: both;
         pointer-events: auto;
     `;
-    
     const titleBar = document.createElement('div');
     titleBar.style.cssText = `
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 12px 16px;
+        padding: 25px 25px;
         background: #f5f5f5;
         border-bottom: 1px solid #ddd;
         flex-shrink: 0;
         user-select: none;
     `;
     const leftPlaceholder = document.createElement('div');
-    leftPlaceholder.style.width = '30px';
+    leftPlaceholder.style.width = '160px';
     const title = document.createElement('span');
-    title.innerText = '📖 空空简介';
+    title.innerText = '关于项目';
     title.style.fontWeight = 'bold';
     title.style.fontSize = '26px';
     title.style.flex = '1';
@@ -368,7 +514,7 @@ function showIntroModal() {
     closeBtn.innerText = '✕';
     closeBtn.style.cursor = 'pointer';
     closeBtn.style.fontSize = '24px';
-    closeBtn.style.padding = '0 6px';
+    closeBtn.style.padding = '0 15px';
     closeBtn.onclick = (e) => {
         e.stopPropagation();
         closeIntroModal();
@@ -376,11 +522,10 @@ function showIntroModal() {
     titleBar.appendChild(leftPlaceholder);
     titleBar.appendChild(title);
     titleBar.appendChild(closeBtn);
-    
     const contentDiv = document.createElement('div');
     contentDiv.style.cssText = `
         flex: 1;
-        padding: 24px;
+        padding: 5em;
         overflow-y: auto;
         font-size: 21px;
         line-height: 1.5;
@@ -389,11 +534,9 @@ function showIntroModal() {
         word-break: break-word;
     `;
     contentDiv.innerText = '加载中...';
-    
     introModal.appendChild(titleBar);
     introModal.appendChild(contentDiv);
     document.body.appendChild(introModal);
-    
     fetch('/data/简介.txt')
         .then(res => {
             if (!res.ok) throw new Error('文件不存在');
@@ -406,7 +549,6 @@ function showIntroModal() {
             console.error('加载简介失败:', err);
             contentDiv.innerText = '❌ 无法加载简介内容，请确保 /data/简介.txt 文件存在。';
         });
-    
     isIntroModalVisible = true;
     bindOutsideClick();
 }
@@ -436,30 +578,6 @@ function closeIntroModal() {
     }
 }
 
-// ---------- 7. 核心变量 ----------
-let activeGrid = null;
-let hoveredGridName = '';
-let gridParents = [];
-const originalData = new Map();
-let mixer = null;
-let interactiveMeshes = [];
-
-// 存储 kong_remesh 模型的所有 Mesh
-let kongRemeshMeshSet = new Set();
-
-// 弹窗相关变量 (改用 Mesh + CanvasTexture)
-let dialogMeshMap = new Map();      // grid -> dialogMesh
-let currentVisibleDialogMesh = null;
-
-const CAM_ZOOM_IN = 1.2;
-const PULL_DISTANCE = 8;
-const PULL_DIRECTION = new THREE.Vector3(0, 0, 1);
-const SCALE_FACTOR = 1.25;
-const CAM_RIGHT_OFFSET_RATIO = 0.55;
-const CAM_EXTRA_ZOOM = -28;
-const MIN_CAMERA_DISTANCE = 12;
-
-// ---------- 8. Excel 数据加载 ----------
 const gridDataMap = new Map();
 
 function buildImageUrl(fileName) {
@@ -473,13 +591,17 @@ async function loadExcelData() {
         const response = await fetch('/data/grid_data.xlsx');
         if (!response.ok) {
             console.warn('Excel 文件未找到');
+            markExcelLoaded();
             return false;
         }
         const arrayBuffer = await response.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "" });
-        if (!rows || rows.length < 2) return false;
+        if (!rows || rows.length < 2) {
+            markExcelLoaded();
+            return false;
+        }
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
             if (!row || row.length === 0) continue;
@@ -494,9 +616,11 @@ async function loadExcelData() {
             gridDataMap.set(pureId, { name, wechatImgUrl, location, note });
         }
         console.log(`加载 ${gridDataMap.size} 条格子配置`);
+        markExcelLoaded();
         return true;
     } catch (err) {
         console.error('Excel 解析失败:', err);
+        markExcelLoaded();
         return false;
     }
 }
@@ -509,25 +633,18 @@ function getDialogDataForGrid(gridParent) {
     return gridDataMap.get(gridNumber) || null;
 }
 
-// ---------- 9. 3D弹窗创建 (Mesh + CanvasTexture，固定旋转角度实现侧面透视) ----------
-const DIALOG_WIDTH = 5.8;      // 几何体宽度
-const DIALOG_HEIGHT = 6;     // 几何体高度
+const DIALOG_WIDTH = 5.8;
+const DIALOG_HEIGHT = 6;
 const DIALOG_CANVAS_WIDTH = 800;
 const DIALOG_CANVAS_HEIGHT = 830;
 
-// 绘制弹窗内容到 Canvas
 function drawDialogToCanvas(canvas, data, onImageLoaded) {
     const ctx = canvas.getContext('2d');
     const w = DIALOG_CANVAS_WIDTH;
     const h = DIALOG_CANVAS_HEIGHT;
-    
     ctx.clearRect(0, 0, w, h);
-    
-    // 背景纯色（已通过 toneMapped:false 保证准确）
     ctx.fillStyle = '#9adbf5';
     ctx.fillRect(0, 0, w, h);
-    
-    // 圆角裁剪
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(20, 0);
@@ -541,17 +658,11 @@ function drawDialogToCanvas(canvas, data, onImageLoaded) {
     ctx.quadraticCurveTo(0, 0, 20, 0);
     ctx.closePath();
     ctx.clip();
-    
-    // ========= 左侧图片区域 =========
     const imgSize = 180;
     const imgX = 25;
     const imgY = 25;
-    
-    // 图片占位（透明）
     ctx.fillStyle = 'rgba(255,255,255,0.01)';
     ctx.fillRect(imgX, imgY, imgSize, imgSize);
-    
-    // 异步加载图片
     if (data.wechatImgUrl) {
         const img = new Image();
         img.crossOrigin = "Anonymous";
@@ -580,48 +691,33 @@ function drawDialogToCanvas(canvas, data, onImageLoaded) {
         ctx.textBaseline = 'middle';
         ctx.fillText('📷', imgX + imgSize/2, imgY + imgSize/2);
     }
-    
-    // ========= 右侧文本区域 =========
-    const textX = imgX + imgSize + 21;   // 姓名/地点左边缘
+    const textX = imgX + imgSize + 21;
     const textY = imgY + 8;
-    const maxTextWidth = w - textX - 20; // 姓名/地点最大宽度
-    
-    // 姓名
     ctx.fillStyle = '#FFFFFF';
     ctx.font = `bold 70px "Microsoft YaHei", "PingFang SC"`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     let nameText = data.name || '匿名';
     ctx.fillText(nameText, textX, textY + 12);
-    
-    // 地点
     ctx.font = `45px "Microsoft YaHei", "PingFang SC"`;
     ctx.fillStyle = '#F0E05F';
     let locationText = `📍 ${data.location || '未知地点'}`;
     ctx.fillText(locationText, textX, textY + 120);
-    
-    // ========= 底部笔记区域（修正：左边缘与图片左边缘对齐，右边缘与弹窗右边缘对齐）=========
-    const noteY = imgY + imgSize + 45;     // 图片底部向下45px
-    const noteLeftMargin = 25;              // 笔记文字左边距（与图片左边缘对齐）
-    const noteRightMargin = 25;             // 右边距
-    const noteMaxWidth = w - noteLeftMargin - noteRightMargin;   // 笔记文字最大宽度
-    
-    // 分割线（从左边距到右边距）
+    const noteY = imgY + imgSize + 45;
+    const noteLeftMargin = 25;
+    const noteRightMargin = 25;
+    const noteMaxWidth = w - noteLeftMargin - noteRightMargin;
     ctx.beginPath();
     ctx.moveTo(noteLeftMargin, noteY - 8);
     ctx.lineTo(w - noteRightMargin, noteY - 8);
     ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    
-    // 笔记文字
     ctx.fillStyle = '#FFFFFF';
     ctx.font = `28px "Microsoft YaHei", "PingFang SC"`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     const noteText = data.note || '暂无笔记';
-    
-    // 自动换行（基于 noteMaxWidth）
     let lines = [];
     let currentLine = '';
     for (let i = 0; i < noteText.length; i++) {
@@ -635,7 +731,6 @@ function drawDialogToCanvas(canvas, data, onImageLoaded) {
         }
     }
     if (currentLine) lines.push(currentLine);
-    
     const lineHeight = 35;
     const maxLines = Math.min(lines.length, 12);
     for (let i = 0; i < maxLines; i++) {
@@ -644,22 +739,17 @@ function drawDialogToCanvas(canvas, data, onImageLoaded) {
     if (lines.length > 12) {
         ctx.fillText('...', noteLeftMargin, noteY + 12 * lineHeight);
     }
-    
     ctx.restore();
 }
 
-// 创建单个弹窗Mesh
 function createDialogMesh(data) {
     const canvas = document.createElement('canvas');
     canvas.width = DIALOG_CANVAS_WIDTH;
     canvas.height = DIALOG_CANVAS_HEIGHT;
-    
     const texture = new THREE.CanvasTexture(canvas);
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     texture.colorSpace = THREE.SRGBColorSpace;
-    // 先绘制基本内容（图片异步稍后更新）
-    let redrawNeeded = false;
     const updateTexture = () => {
         drawDialogToCanvas(canvas, data, () => {
             texture.needsUpdate = true;
@@ -667,7 +757,6 @@ function createDialogMesh(data) {
         texture.needsUpdate = true;
     };
     updateTexture();
-    
     const material = new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
@@ -676,21 +765,14 @@ function createDialogMesh(data) {
         depthTest: true,
         depthWrite: true
     });
-    
     const geometry = new THREE.PlaneGeometry(DIALOG_WIDTH, DIALOG_HEIGHT);
     const mesh = new THREE.Mesh(geometry, material);
-    
-    // 设置固定旋转角度：绕Y轴旋转 -0.4 弧度，产生侧面透视效果，像模型一样有角度
     mesh.rotation.y = 0;
-    
-    // 存储关联数据以便后续可能的更新
     mesh.userData = { data, canvas, texture };
     mesh.visible = false;
-    
     return mesh;
 }
 
-// 更新弹窗位置（基于格子的包围盒右侧偏移）
 function updateDialogPositionForGrid(grid, dialogMesh) {
     const box = new THREE.Box3().setFromObject(grid);
     if (box.isEmpty()) return;
@@ -699,12 +781,11 @@ function updateDialogPositionForGrid(grid, dialogMesh) {
     const pos = new THREE.Vector3(
         box.max.x + 3,
         (box.min.y + box.max.y) / 2 + verticalCorrection + 0.6,
-        (box.min.z + box.max.z) / 2+3.38
+        (box.min.z + box.max.z) / 2 + 3.38
     );
     dialogMesh.position.copy(pos);
 }
 
-// 显示指定格子的弹窗
 function showDialogForGrid(grid) {
     if (currentVisibleDialogMesh) {
         currentVisibleDialogMesh.visible = false;
@@ -718,7 +799,6 @@ function showDialogForGrid(grid) {
     }
 }
 
-// 隐藏所有弹窗
 function hideAllDialogs() {
     if (currentVisibleDialogMesh) {
         currentVisibleDialogMesh.visible = false;
@@ -726,16 +806,15 @@ function hideAllDialogs() {
     }
 }
 
-// 更新当前可见弹窗位置（动画中调用）
 function updateActiveDialogPosition() {
     if (currentVisibleDialogMesh && activeGrid) {
         updateDialogPositionForGrid(activeGrid, currentVisibleDialogMesh);
     }
 }
 
-// 为所有格子创建弹窗（模型加载后调用）
 function createAllDialogMeshes() {
     for (let grid of gridParents) {
+        if (dialogMeshMap.has(grid)) continue;
         const data = getDialogDataForGrid(grid);
         if (!data) continue;
         const dialogMesh = createDialogMesh(data);
@@ -745,7 +824,6 @@ function createAllDialogMeshes() {
     console.log(`创建 ${dialogMeshMap.size} 个3D弹窗`);
 }
 
-// ---------- 10. 模型加载 ----------
 function optimizeMaterialTextures(material) {
     if (!material) return;
     if (material.map) material.map.anisotropy = 16;
@@ -754,6 +832,13 @@ function optimizeMaterialTextures(material) {
     if (material.metalnessMap) material.metalnessMap.anisotropy = 16;
     if (material.normalMap) material.normalMap.anisotropy = 16;
     material.precision = 'highp';
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = 2;
+    material.polygonOffsetUnits = 2;
+    material.shadowSide = THREE.FrontSide;
+    if (material.transparent) {
+        material.alphaTest = 0.1;
+    }
 }
 
 const loader = new GLTFLoader();
@@ -765,8 +850,65 @@ ktx2Loader.setTranscoderPath('https://www.gstatic.com/basis-universal/v1/basis/'
 ktx2Loader.detectSupport(renderer);
 loader.setKTX2Loader(ktx2Loader);
 
+const originalData = new Map();
+
+const CAM_ZOOM_IN = 1.2;
+const PULL_DISTANCE = 8;
+const PULL_DIRECTION = new THREE.Vector3(0, 0, 1);
+const SCALE_FACTOR = 1.25;
+const CAM_RIGHT_OFFSET_RATIO = 0.55;
+const CAM_EXTRA_ZOOM = -28;
+const MIN_CAMERA_DISTANCE = 12;
+
+function playPullAndScaleAnimation(gridParent, onComplete) {
+    const data = originalData.get(gridParent);
+    if (!data) return;
+    gsap.killTweensOf(gridParent.position);
+    gsap.killTweensOf(gridParent.scale);
+    const targetPos = data.position.clone().add(PULL_DIRECTION.clone().multiplyScalar(PULL_DISTANCE));
+    const targetScale = data.scale.clone().multiplyScalar(SCALE_FACTOR);
+    gsap.to(gridParent.position, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: 0.35, ease: "power2.out" });
+    gsap.to(gridParent.scale, { x: targetScale.x, y: targetScale.y, z: targetScale.z, duration: 0.4, ease: "back.out(1.7)", onComplete });
+    gridParent.traverse(child => { if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.3, g: 0.35, b: 0.45, duration: 0.3 }); });
+}
+
+function resetGridAnimation(gridParent) {
+    const data = originalData.get(gridParent);
+    if (!data) return;
+    gsap.killTweensOf(gridParent.position);
+    gsap.killTweensOf(gridParent.scale);
+    gsap.to(gridParent.scale, { x: data.scale.x, y: data.scale.y, z: data.scale.z, duration: 0.25, ease: "power2.inOut" });
+    gsap.to(gridParent.position, { x: data.position.x, y: data.position.y, z: data.position.z, duration: 0.25, ease: "power2.inOut" });
+    gridParent.traverse(child => { if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.1, g: 0.1, b: 0.1, duration: 0.25 }); });
+}
+
+function getCameraPositionForGrid(grid) {
+    const box = new THREE.Box3().setFromObject(grid);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = camera.fov * Math.PI / 180;
+    let baseDistance = maxDim / (2 * Math.tan(fov / 2)) + 3.0;
+    let finalDistance = Math.max(baseDistance - CAM_EXTRA_ZOOM, MIN_CAMERA_DISTANCE);
+    const rightOffset = size.x * CAM_RIGHT_OFFSET_RATIO;
+    return {
+        pos: new THREE.Vector3(center.x + rightOffset, center.y, center.z + finalDistance),
+        target: new THREE.Vector3(center.x + rightOffset, center.y, center.z)
+    };
+}
+
+function animateCameraToGrid(grid) {
+    const { pos, target } = getCameraPositionForGrid(grid);
+    gsap.killTweensOf(camera.position);
+    gsap.killTweensOf(controls.target);
+    gsap.killTweensOf(camera);
+    gsap.to(camera.position, { x: pos.x, y: pos.y, z: pos.z, duration: 1.2, ease: "power2.inOut", onUpdate: () => controls.update() });
+    gsap.to(controls.target, { x: target.x, y: target.y, z: target.z, duration: 1.2, ease: "power2.inOut", onUpdate: () => { camera.lookAt(controls.target); controls.update(); } });
+    gsap.to(camera, { zoom: CAM_ZOOM_IN, duration: 1.2, ease: "power2.inOut", onUpdate: () => camera.updateProjectionMatrix() });
+}
+
 function loadModel() {
-    loader.load('/kongmin04002.glb', (gltf) => {
+    loader.load('/kongmin0414.glb', (gltf) => {
         const model = gltf.scene;
         if (gltf.animations?.length) {
             mixer = new THREE.AnimationMixer(model);
@@ -830,131 +972,107 @@ function loadModel() {
         interactiveMeshes = [];
         gridParents.forEach(grid => { grid.traverse(o => { if (o.isMesh) interactiveMeshes.push(o); }); });
         
-        // 查找所有名称包含 "kong_remesh" 的模型
         kongRemeshMeshSet.clear();
-        const collectKongRemeshMeshes = (node) => {
-            if (node.name && node.name.toLowerCase().includes('kong_remesh')) {
+        glowMeshSet.clear();
+        const collectGlowMeshes = (node) => {
+            const nameLower = node.name ? node.name.toLowerCase() : '';
+            const isKongRemesh = nameLower.includes('kong_remesh');
+            const isText4 = nameLower.includes('文本_4') || nameLower.includes('text_4');
+            if (isKongRemesh || isText4) {
                 node.traverse(sub => {
                     if (sub.isMesh) {
-                        kongRemeshMeshSet.add(sub);
-                        if (!interactiveMeshes.includes(sub)) {
-                            interactiveMeshes.push(sub);
-                        }
+                        glowMeshSet.add(sub);
+                        if (!interactiveMeshes.includes(sub)) interactiveMeshes.push(sub);
+                        if (isKongRemesh && !kongRemeshMeshSet.has(sub)) kongRemeshMeshSet.add(sub);
                     }
                 });
             } else {
-                node.children.forEach(child => collectKongRemeshMeshes(child));
+                node.children.forEach(child => collectGlowMeshes(child));
             }
         };
-        collectKongRemeshMeshes(model);
-        if (kongRemeshMeshSet.size > 0) {
-            console.log(`找到 ${kongRemeshMeshSet.size} 个 kong_remesh 模型网格，已加入交互检测`);
+        collectGlowMeshes(model);
+        
+        initTopPointLights();
+        if (!isDayMode) {
+            topPointLights.forEach(light => { if (light) light.intensity = 8; });
         } else {
-            console.warn('未找到名称包含 "kong_remesh" 的模型，请检查 GLB 文件中的节点命名');
+            topPointLights.forEach(light => { if (light) light.intensity = 0; });
         }
         
-        // 创建所有弹窗
-        createAllDialogMeshes();
+        setGlowModelsIntensity(0.1, 0x222222);
+        
+        markModelLoaded();
         
         const loadingEl = document.getElementById('loading');
         if (loadingEl) loadingEl.style.display = 'none';
     }, (xhr) => {
-        const percent = (xhr.loaded / xhr.total * 100).toFixed(2);
-        const loadingDiv = document.getElementById('loading');
-        if (loadingDiv) loadingDiv.innerText = `✨ 加载中 ${percent}% ✨`;
+        if (xhr.lengthComputable) {
+            updateModelProgress(xhr.loaded, xhr.total);
+        }
     }, (error) => {
         console.error('模型加载失败:', error);
-        const loadingDiv = document.getElementById('loading');
-        if (loadingDiv) loadingDiv.innerHTML = '❌ 模型加载失败<br>请确保模型文件存在';
+        if (loadingOverlay) {
+            loadingOverlay.innerHTML = `<div class="loading-container"><div class="loading-text">❌ 加载失败</div><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:100%; background:#e05a5a;"></div></div><div class="loading-sub">请检查网络或模型文件</div></div>`;
+        }
+        markModelLoaded();
     });
 }
 
-function playPullAndScaleAnimation(gridParent, onComplete) {
-    const data = originalData.get(gridParent);
-    if (!data) return;
-    gsap.killTweensOf(gridParent.position);
-    gsap.killTweensOf(gridParent.scale);
-    const targetPos = data.position.clone().add(PULL_DIRECTION.clone().multiplyScalar(PULL_DISTANCE));
-    const targetScale = data.scale.clone().multiplyScalar(SCALE_FACTOR);
-    gsap.to(gridParent.position, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: 0.35, ease: "power2.out" });
-    gsap.to(gridParent.scale, { x: targetScale.x, y: targetScale.y, z: targetScale.z, duration: 0.4, ease: "back.out(1.7)", onComplete });
-    gridParent.traverse(child => { if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.3, g: 0.35, b: 0.45, duration: 0.3 }); });
-}
-
-function resetGridAnimation(gridParent) {
-    const data = originalData.get(gridParent);
-    if (!data) return;
-    gsap.killTweensOf(gridParent.position);
-    gsap.killTweensOf(gridParent.scale);
-    gsap.to(gridParent.scale, { x: data.scale.x, y: data.scale.y, z: data.scale.z, duration: 0.25, ease: "power2.inOut" });
-    gsap.to(gridParent.position, { x: data.position.x, y: data.position.y, z: data.position.z, duration: 0.25, ease: "power2.inOut" });
-    gridParent.traverse(child => { if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.1, g: 0.1, b: 0.1, duration: 0.25 }); });
-}
-
-function getCameraPositionForGrid(grid) {
-    const box = new THREE.Box3().setFromObject(grid);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = camera.fov * Math.PI / 180;
-    let baseDistance = maxDim / (2 * Math.tan(fov / 2)) + 3.0;
-    let finalDistance = Math.max(baseDistance - CAM_EXTRA_ZOOM, MIN_CAMERA_DISTANCE);
-    const rightOffset = size.x * CAM_RIGHT_OFFSET_RATIO;
-    return {
-        pos: new THREE.Vector3(center.x + rightOffset, center.y, center.z + finalDistance),
-        target: new THREE.Vector3(center.x + rightOffset, center.y, center.z)
-    };
-}
-
-function animateCameraToGrid(grid) {
-    const { pos, target } = getCameraPositionForGrid(grid);
-    gsap.killTweensOf(camera.position);
-    gsap.killTweensOf(controls.target);
-    gsap.killTweensOf(camera);
-    gsap.to(camera.position, { x: pos.x, y: pos.y, z: pos.z, duration: 1.2, ease: "power2.inOut", onUpdate: () => controls.update() });
-    gsap.to(controls.target, { x: target.x, y: target.y, z: target.z, duration: 1.2, ease: "power2.inOut", onUpdate: () => { camera.lookAt(controls.target); controls.update(); } });
-    gsap.to(camera, { zoom: CAM_ZOOM_IN, duration: 1.2, ease: "power2.inOut", onUpdate: () => camera.updateProjectionMatrix() });
-}
-
-// ---------- 11. 射线交互 ----------
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+let currentHoveredGrid = null;
 
 function onMouseMove(event) {
-    if (interactiveMeshes.length === 0) return;
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+}
+
+function performRaycast() {
+    if (interactiveMeshes.length === 0) return;
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(interactiveMeshes, false);
-    const lastHoveredGrid = gridParents.find(g => g.name === hoveredGridName);
-    
+    let hitGrid = null;
+    let hitKongRemesh = false;
     if (intersects.length) {
         const hitObject = intersects[0].object;
         if (kongRemeshMeshSet.has(hitObject)) {
-            if (lastHoveredGrid) {
-                lastHoveredGrid.traverse(child => {
+            hitKongRemesh = true;
+            document.body.style.cursor = 'pointer';
+            if (currentHoveredGrid) {
+                currentHoveredGrid.traverse(child => {
                     if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.1, g: 0.1, b: 0.1, duration: 0.2 });
                 });
+                currentHoveredGrid = null;
                 hoveredGridName = '';
             }
-            document.body.style.cursor = 'pointer';
             return;
         }
-    }
-    
-    if (intersects.length) {
         let parent = intersects[0].object.parent;
         while (parent && !parent.name?.match(/^Grid_\d+$/)) parent = parent.parent;
-        const newHoveredName = parent ? parent.name : '';
-        if (newHoveredName && newHoveredName !== hoveredGridName) {
-            if (lastHoveredGrid) lastHoveredGrid.traverse(child => { if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.1, g: 0.1, b: 0.1, duration: 0.2 }); });
-            if (parent) parent.traverse(child => { if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.4, g: 0.25, b: 0.6, duration: 0.2 }); });
-            hoveredGridName = newHoveredName;
+        hitGrid = parent;
+    }
+    if (hitGrid && gridParents.includes(hitGrid)) {
+        if (currentHoveredGrid !== hitGrid) {
+            if (currentHoveredGrid) {
+                currentHoveredGrid.traverse(child => {
+                    if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.1, g: 0.1, b: 0.1, duration: 0.2 });
+                });
+            }
+            hitGrid.traverse(child => {
+                if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.4, g: 0.25, b: 0.6, duration: 0.2 });
+            });
+            currentHoveredGrid = hitGrid;
+            hoveredGridName = hitGrid.name;
         }
         document.body.style.cursor = 'pointer';
     } else {
-        if (lastHoveredGrid) lastHoveredGrid.traverse(child => { if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.1, g: 0.1, b: 0.1, duration: 0.2 }); });
-        hoveredGridName = '';
+        if (currentHoveredGrid) {
+            currentHoveredGrid.traverse(child => {
+                if (child.isMesh && child.material) gsap.to(child.material.emissive, { r: 0.1, g: 0.1, b: 0.1, duration: 0.2 });
+            });
+            currentHoveredGrid = null;
+            hoveredGridName = '';
+        }
         document.body.style.cursor = 'default';
     }
 }
@@ -963,12 +1081,11 @@ function onMouseClick(event) {
     if (isIntroModalVisible) return;
     if (interactiveMeshes.length === 0) return;
     if (event.target.closest && (event.target.closest('div')?.style?.zIndex === '100' || event.target.closest('div')?.style?.zIndex === '200')) return;
-    
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    raycaster.setFromCamera(mouse, camera);
+    const clickMouse = new THREE.Vector2();
+    clickMouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    clickMouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(clickMouse, camera);
     const intersects = raycaster.intersectObjects(interactiveMeshes, false);
-    
     if (intersects.length) {
         const hitObject = intersects[0].object;
         if (kongRemeshMeshSet.has(hitObject)) {
@@ -976,14 +1093,12 @@ function onMouseClick(event) {
             return;
         }
     }
-    
     let clickedGrid = null;
     if (intersects.length) {
         let parent = intersects[0].object.parent;
         while (parent && !parent.name?.match(/^Grid_\d+$/)) parent = parent.parent;
         clickedGrid = parent;
     }
-    
     if (clickedGrid && gridParents.includes(clickedGrid)) {
         if (activeGrid && activeGrid !== clickedGrid) {
             resetGridAnimation(activeGrid);
@@ -1018,7 +1133,6 @@ window.addEventListener('mousemove', onMouseMove);
 window.addEventListener('click', onMouseClick);
 window.addEventListener('wheel', onWheel);
 
-// ---------- 12. 动画循环 ----------
 const clock = new THREE.Clock();
 let lastTime = 0;
 
@@ -1026,6 +1140,7 @@ function animate(currentTime = 0) {
     requestAnimationFrame(animate);
     const delta = Math.min(0.033, (currentTime - lastTime) / 1000);
     lastTime = currentTime;
+    performRaycast();
     if (mixer) mixer.update(delta);
     controls.update();
     updateActiveDialogPosition();
@@ -1047,6 +1162,7 @@ window.addEventListener('resize', () => {
 });
 
 async function initApp() {
+    createLoadingOverlay();
     await loadExcelData();
     loadModel();
 }
